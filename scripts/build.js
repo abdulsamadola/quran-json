@@ -1,12 +1,31 @@
 const fs = require('fs-extra')
 const _ = require('lodash')
 const meta = require('../package.json')
+const { default: axios } = require('axios')
+
+const cache = new Map()
+
+const fetchWithCache = async (url) => {
+  if (cache.has(url)) {
+    return cache.get(url)
+  }
+
+  try {
+    const resp = await axios.get(url)
+    cache.set(url, resp.data)
+    return resp.data
+  } catch (error) {
+    console.error(`Failed to fetch ${url}:`, error.message)
+    return null
+  }
+}
 
 const generateQuran = async (lang = null, pretty = false) => {
   const filename = lang ? `quran_${lang}.json` : 'quran.json'
 
   console.log(`+ Generating ${filename}...`)
 
+  // Load Quran data & translations from local files
   const [chapters, quran, trans] = await Promise.all([
     fs.readJson(
       `data/chapters/${
@@ -17,7 +36,38 @@ const generateQuran = async (lang = null, pretty = false) => {
     lang ? fs.readJson(`data/editions/${lang}.json`) : null,
   ])
 
-  const data = chapters.map((item) => {
+  let data = []
+
+  for (let chapterIdx = 0; chapterIdx < chapters.length; chapterIdx++) {
+    const item = chapters[chapterIdx]
+
+    console.log(`Fetching Tajweed for Chapter ${chapterIdx + 1}...`)
+
+    let tajweeds = []
+    try {
+      const resp = await axios.get(
+        `https://api.alquran.cloud/v1/surah/${
+          chapterIdx + 1
+        }/editions/quran-tajweed`
+      )
+
+      tajweeds = resp.data?.data[0]?.ayahs || []
+
+      // Delay 500ms to avoid API rate limits
+      await delay(500)
+    } catch (error) {
+      console.error(`Error fetching chapter ${chapterIdx + 1}:`, error.message)
+
+      // If rate limit is exceeded, wait longer before retrying
+      if (error.response?.data?.message.includes('API rate limit exceeded')) {
+        console.log('Rate limit hit. Waiting 5 seconds before retrying...')
+        await delay(5000)
+        chapterIdx-- // Retry the same chapter
+        continue
+      }
+    }
+
+    // Build Chapter Data
     const chapter = {
       id: item.id,
       name: item.name,
@@ -29,6 +79,7 @@ const generateQuran = async (lang = null, pretty = false) => {
         const verse = {
           id: i.verse,
           text: i.text,
+          tajweed: tajweeds[idx]?.text || null, // Assign Tajweed text if available
         }
 
         if (trans) {
@@ -45,11 +96,13 @@ const generateQuran = async (lang = null, pretty = false) => {
       delete chapter.translation
     }
 
-    return chapter
-  })
+    data.push(chapter)
+  }
 
+  // Save the generated JSON file
   await fs.outputJson(`dist/${filename}`, data, { spaces: pretty ? 2 : 0 })
 
+  console.log(`✅ ${filename} generated successfully!`)
   return data
 }
 
@@ -84,16 +137,32 @@ const generateByChapter = async (chapters, lang = null, pretty = false) => {
   })
 }
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 const generateByVerses = async (quran, transQurans, pretty = false) => {
   let id = 1
 
-  const verses = _.flatten(
-    quran.chapters.map((chapter, chapterIdx) => {
-      return chapter.verses.map((verse, verseIdx) => {
-        return {
+  const verses = []
+  for (let chapterIdx = 0; chapterIdx < quran.chapters.length; chapterIdx++) {
+    const chapter = quran.chapters[chapterIdx]
+
+    console.log(`Fetching Tajweed for Chapter ${chapterIdx + 1}...`)
+
+    try {
+      const resp = await axios.get(
+        `https://api.alquran.cloud/v1/surah/${
+          chapterIdx + 1
+        }/editions/quran-tajweed`
+      )
+
+      const tajweeds = resp.data?.data[0]?.ayahs || []
+
+      chapter.verses.forEach((verse, verseIdx) => {
+        verses.push({
           id: id++,
           number: verse.id,
           text: verse.text,
+          tajweed: tajweeds[verseIdx] || null,
           translations: _.zipObject(
             transQurans.map((transQuran) => transQuran.lang),
             transQurans.map(
@@ -114,10 +183,21 @@ const generateByVerses = async (quran, transQurans, pretty = false) => {
             ),
             type: chapter.type,
           },
-        }
+        })
       })
-    })
-  )
+
+      // Delay 500ms to avoid rate limit
+      await delay(500)
+    } catch (error) {
+      console.error(`Error fetching chapter ${chapterIdx + 1}:`, error.message)
+      // If rate limit is exceeded, wait longer before retrying
+      if (error.response?.data?.message.includes('API rate limit exceeded')) {
+        console.log('Rate limit hit. Waiting 5 seconds before retrying...')
+        await delay(5000)
+        chapterIdx-- // Retry the same chapter
+      }
+    }
+  }
 
   const chunkVerses = _.chunk(verses, 100)
 
