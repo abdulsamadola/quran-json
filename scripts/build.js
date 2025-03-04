@@ -142,27 +142,13 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const generateByVerses = async (quran, transQurans, pretty = false) => {
   let id = 1
 
-  const verses = []
-  for (let chapterIdx = 0; chapterIdx < quran.chapters.length; chapterIdx++) {
-    const chapter = quran.chapters[chapterIdx]
-
-    console.log(`Fetching Tajweed for Chapter ${chapterIdx + 1}...`)
-
-    try {
-      const resp = await axios.get(
-        `https://api.alquran.cloud/v1/surah/${
-          chapterIdx + 1
-        }/editions/quran-tajweed`
-      )
-
-      const tajweeds = resp.data?.data[0]?.ayahs || []
-
-      chapter.verses.forEach((verse, verseIdx) => {
-        verses.push({
+  const verses = _.flatten(
+    quran.chapters.map((chapter, chapterIdx) => {
+      return chapter.verses.map((verse, verseIdx) => {
+        return {
           id: id++,
           number: verse.id,
           text: verse.text,
-          tajweed: tajweeds[verseIdx] || null,
           translations: _.zipObject(
             transQurans.map((transQuran) => transQuran.lang),
             transQurans.map(
@@ -183,21 +169,10 @@ const generateByVerses = async (quran, transQurans, pretty = false) => {
             ),
             type: chapter.type,
           },
-        })
+        }
       })
-
-      // Delay 500ms to avoid rate limit
-      await delay(500)
-    } catch (error) {
-      console.error(`Error fetching chapter ${chapterIdx + 1}:`, error.message)
-      // If rate limit is exceeded, wait longer before retrying
-      if (error.response?.data?.message.includes('API rate limit exceeded')) {
-        console.log('Rate limit hit. Waiting 5 seconds before retrying...')
-        await delay(5000)
-        chapterIdx-- // Retry the same chapter
-      }
-    }
-  }
+    })
+  )
 
   const chunkVerses = _.chunk(verses, 100)
 
