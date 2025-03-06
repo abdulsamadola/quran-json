@@ -69,11 +69,8 @@ const downloadEdition = async (edition, file) => {
 
     // English, Author: Umm Muhammad (Saheeh International), Source: https://tanzil.net/trans/en.sahih
     downloadEdition('eng-ummmuhammad', 'data/editions/en.json'),
-    downloadEdition('hau-abubakarmahmoud-la', 'data/editions/ha_gumi.json'),
-    downloadEdition(
-      'yor-shaykhaburahima-la',
-      'data/editions/yoruba_mikail.json'
-    ),
+    downloadEdition('hau-abubakarmahmoud', 'data/editions/ha_gumi.json'),
+    downloadEdition('yor-shaykhaburahima', 'data/editions/yoruba_mikail.json'),
   ])
 
   console.log('✓ Done')
